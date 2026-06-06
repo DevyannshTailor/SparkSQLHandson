@@ -1,33 +1,37 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, avg, count, sum, when, round
+from pyspark.sql.functions import col, sum, avg, count, when, round
 
 # Initialize Spark Session
-spark = SparkSession.builder.appName("SentimentByDemographics").getOrCreate()
+spark = SparkSession.builder.appName("UserEngagement").getOrCreate()
 
 # Load data
 posts_df = spark.read.option("header", True).option("inferSchema", True).csv("input/posts.csv")
 users_df = spark.read.option("header", True).option("inferSchema", True).csv("input/users.csv")
 
-# Join posts with users to get demographic columns
+# Join posts with users on UserID
 joined_df = posts_df.join(users_df, on="UserID", how="inner")
 
-# Group by Country and AgeGroup, count positive/neutral/negative posts using when()
-sentiment_breakdown = (
+# Aggregate per user: total posts, likes, retweets, total engagement, avg sentiment, sentiment label
+user_engagement = (
     joined_df
-    .groupBy("Country", "AgeGroup")
+    .groupBy("UserID", "Username", "AgeGroup", "Country", "Verified")
     .agg(
-        count("PostID").alias("total_posts"),
-        round(avg("SentimentScore"), 4).alias("avg_sentiment"),
-        round(avg(col("Likes") + col("Retweets")), 2).alias("avg_engagement"),
-        sum(when(col("SentimentScore") >  0.3,  1).otherwise(0)).alias("positive_posts"),  # score > 0.3  → Positive
-        sum(when(col("SentimentScore") < -0.3,  1).otherwise(0)).alias("negative_posts"),  # score < -0.3 → Negative
-        sum(when((col("SentimentScore") >= -0.3) &
-                 (col("SentimentScore") <=  0.3), 1).otherwise(0)).alias("neutral_posts")  # in between   → Neutral
+        count("PostID").alias("total_posts"),                          # how many posts each user made
+        sum("Likes").alias("total_likes"),                             # sum of all likes
+        sum("Retweets").alias("total_retweets"),                       # sum of all retweets
+        (sum("Likes") + sum("Retweets")).alias("total_engagement"),    # combined engagement score
+        round(avg("SentimentScore"), 4).alias("avg_sentiment")         # average sentiment across posts
     )
-    .orderBy(col("avg_sentiment").desc(), col("total_posts").desc())
+    .withColumn(                                                        # classify user's overall sentiment
+        "sentiment_label",
+        when(col("avg_sentiment") >  0.3, "Positive")
+       .when(col("avg_sentiment") < -0.3, "Negative")
+       .otherwise("Neutral")
+    )
+    .orderBy(col("total_engagement").desc())                           # rank by highest engagement first
 )
 
-sentiment_breakdown.show(30, truncate=False)
+user_engagement.show(20, truncate=False)
 
 # Save result
-sentiment_breakdown.coalesce(1).write.mode("overwrite").csv("outputs/sentiment_by_demographics.csv", header=True)
+user_engagement.coalesce(1).write.mode("overwrite").csv("outputs/engagement_by_age.csv", header=True)
