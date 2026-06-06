@@ -34,4 +34,4 @@ user_engagement = (
 user_engagement.show(20, truncate=False)
 
 # Save result
-user_engagement.coalesce(1).write.mode("overwrite").csv("outputs/user_engagement.csv", header=True)
+user_engagement.coalesce(1).write.mode("overwrite").csv("outputs/engagement_by_age.csv", header=True)
